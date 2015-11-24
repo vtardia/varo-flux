@@ -4,7 +4,7 @@
   "description": "A Flux-style action dispatcher built on top of Varo pattern match library.",
   "main": "index.js",
   "scripts": {
-    "build": "mkdir ./lib && babel src/Dispatcher.js > lib/Dispatcher.js",
+    "build": "babel src/Dispatcher.js > lib/Dispatcher.js",
     "test": "npm run build && NODE_ENV=test jest",
     "prepublish": "npm run build && browserify lib/Dispatcher.js --outfile dist/varo-flux.js && browserify lib/Dispatcher.js | uglifyjs > dist/varo-flux.min.js"
   },
