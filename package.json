@@ -1,0 +1,52 @@
+{
+  "name": "varo-flux",
+  "version": "1.0.0",
+  "description": "A Flux-style action dispatcher built on top of Varo pattern match library.",
+  "main": "index.js",
+  "scripts": {
+    "build": "mkdir ./lib && babel src/Dispatcher.js > lib/Dispatcher.js",
+    "test": "npm run build && NODE_ENV=test jest",
+    "prepublish": "npm run build && browserify lib/Dispatcher.js --outfile dist/varo-flux.js && browserify lib/Dispatcher.js | uglifyjs > dist/varo-flux.min.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vtardia/varo-flux.git"
+  },
+  "keywords": [
+    "varo",
+    "flux",
+    "react",
+    "dispatcher"
+  ],
+  "author": "Vito Tardia (http://vito.tardia.me)",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/vtardia/varo-flux/issues"
+  },
+  "homepage": "https://github.com/vtardia/varo-flux#readme",
+  "dependencies": {
+    "node-uuid": "^1.4.7",
+    "varo": "^0.2.0"
+  },
+  "devDependencies": {
+    "babel": "^5.8.34",
+    "babelify": "^7.2.0",
+    "browserify": "^12.0.1",
+    "jest-cli": "^0.8.0",
+    "uglify-js": "^2.6.1"
+  },
+  "jest": {
+    "modulePathIgnorePatterns": [
+      "/lib/",
+      "/node_modules/"
+    ],
+    "persistModuleRegistryBetweenSpecs": true,
+    "preprocessorIgnorePatterns": [
+      "/node_modules/"
+    ],
+    "rootDir": "",
+    "testPathDirs": [
+      "<rootDir>/src"
+    ]
+  }
+}
