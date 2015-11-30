@@ -1,6 +1,6 @@
 {
   "name": "varo-flux",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A Flux-style action dispatcher built on top of Varo pattern match library.",
   "main": "index.js",
   "scripts": {
@@ -26,7 +26,7 @@
   "homepage": "https://github.com/vtardia/varo-flux#readme",
   "dependencies": {
     "node-uuid": "^1.4.7",
-    "varo": "^0.2.0"
+    "varo": "^0.3.0"
   },
   "devDependencies": {
     "babel": "^5.8.34",

@@ -1,4 +1,4 @@
-![Seneca](http://senecajs.org/files/assets/seneca-logo.png)
+![logo](https://rawgit.com/senecajs/varo/master/assets/varo-logo.svg)
 
 # varo-flux
 

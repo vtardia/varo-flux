@@ -65,7 +65,7 @@ class Dispatcher {
 
   unregister (id) {
     delete this.callbacks[id]
-    V.removeHandler(this.observers[id])
+    V.removeObserver(this.observers[id])
   }
 
   dispatch (payload) {
@@ -79,8 +79,8 @@ class Dispatcher {
     // start dispatching
     start.call(this, payload)
 
-    // dispatch
-    V.act({role: 'dispatcher', payload: payload})
+    // emit dispatcher event
+    V.emit({role: 'dispatcher', event: 'dispatch', payload: payload})
 
     // stop dispatching
     stop.call(this)
