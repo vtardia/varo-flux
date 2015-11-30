@@ -89,7 +89,7 @@ var Dispatcher = (function () {
     key: 'unregister',
     value: function unregister(id) {
       delete this.callbacks[id];
-      V.removeHandler(this.observers[id]);
+      V.removeObserver(this.observers[id]);
     }
   }, {
     key: 'dispatch',
@@ -104,8 +104,8 @@ var Dispatcher = (function () {
       // start dispatching
       start.call(this, payload);
 
-      // dispatch
-      V.act({ role: 'dispatcher', payload: payload });
+      // emit dispatcher event
+      V.emit({ role: 'dispatcher', event: 'dispatch', payload: payload });
 
       // stop dispatching
       stop.call(this);
@@ -21305,72 +21305,72 @@ module.exports = function(arr, obj){
 var Parallel = require('fastparallel')()
 var Bloomrun = require('bloomrun')
 
-var internals = {}
 
-internals.varo = function () {
-  if (!(this instanceof internals.varo)) {
-    return new internals.varo()
+var Varo = function () {
+  if (!(this instanceof Varo)) {
+    return new Varo()
   }
 
   this.handlers = Bloomrun()
   this.observers = Bloomrun()
 }
 
-internals.varo.prototype.act = function (msg, done) {
+Varo.prototype.act = function (msg, done) {
   var handler = this.handlers.lookup(msg)
-  var observers = this.observers.list(msg)
 
   done = done || function () { }
+
+  if (handler) {
+    handler(msg, function (err, reply) {
+      if (err) {
+        return done(err)
+      }
+      else {
+        return done(null, reply)
+      }
+    })
+  }
+}
+
+Varo.prototype.emit = function (msg) {
+  var observers = this.observers.list(msg)
 
   function next (observer, done) {
     observer(msg)
     done()
   }
 
-  function complete (err) {
-    if (handler) {
-      handler(msg, function (err, reply) {
-        if (err) {
-          return done(err)
-        }
-        else {
-          return done(null, reply)
-        }
-      })
-    }
-  }
-
-  return Parallel(this, next, observers, complete)
+  return Parallel(this, next, observers)
 }
 
-internals.varo.prototype.plugin = function (plugin) {
+Varo.prototype.plugin = function (plugin) {
   plugin(this)
   return this
 }
 
-internals.varo.prototype.handle = function (msg, handler) {
+Varo.prototype.handle = function (msg, handler) {
   this.handlers.add(msg, handler)
   return this
 }
 
-internals.varo.prototype.observe = function (msg, observer) {
+Varo.prototype.observe = function (msg, observer) {
   this.observers.add(msg, observer)
   return this
 }
 
-internals.varo.prototype.removeHandler = function (msg, handler) {
+Varo.prototype.removeHandler = function (msg, handler) {
   this.handlers.remove(msg, handler)
   return this
 }
 
-internals.varo.prototype.removeObserver = function (msg, observer) {
+Varo.prototype.removeObserver = function (msg, observer) {
   this.observers.remove(msg, observer)
   return this
 }
 
-module.exports = internals.varo
+module.exports = Varo
 
-},{"bloomrun":223,"fastparallel":284}],223:[function(require,module,exports){
+},{"bloomrun":223,"fastparallel":285}],223:[function(require,module,exports){
 'use strict'
 
 var Bucket = require('./lib/bucket')
@@ -21379,6 +21379,7 @@ var PatternSet = require('./lib/patternSet')
 var genKeys = require('./lib/genKeys')
 var matchingBuckets = require('./lib/matchingBuckets')
 var deepMatch = require('./lib/deepMatch')
+var deepSort = require('./lib/deepSort')
 var Set = require('es6-set')
 
 function BloomRun (opts) {
@@ -21386,6 +21387,7 @@ function BloomRun (opts) {
     return new BloomRun(opts)
   }
 
+  this._isDeep = opts && opts.indexing === 'depth'
   this._buckets = []
   this._properties = new Set()
 }
@@ -21444,8 +21446,12 @@ BloomRun.prototype.add = function (pattern, payload) {
     properties.add(key)
   })
 
-  var patternSet = new PatternSet(pattern, payload)
+  var patternSet = new PatternSet(pattern, payload, this._isDeep)
   bucket.data.push(patternSet)
+
+  if (this._isDeep) {
+    bucket.data.sort(deepSort)
+  }
 
   return this
 }
@@ -21491,7 +21497,7 @@ BloomRun.prototype.iterator = Iterator
 
 module.exports = BloomRun
 
-},{"./lib/bucket":224,"./lib/deepMatch":225,"./lib/genKeys":226,"./lib/iterator":227,"./lib/matchingBuckets":228,"./lib/patternSet":229,"es6-set":231}],224:[function(require,module,exports){
+},{"./lib/bucket":224,"./lib/deepMatch":225,"./lib/deepSort":226,"./lib/genKeys":227,"./lib/iterator":228,"./lib/matchingBuckets":229,"./lib/patternSet":230,"es6-set":232}],224:[function(require,module,exports){
 'use strict'
 
 var BloomFilter = require('bloomfilter').BloomFilter
@@ -21506,7 +21512,7 @@ function Bucket () {
 
 module.exports = Bucket
 
-},{"bloomfilter":230}],225:[function(require,module,exports){
+},{"bloomfilter":231}],225:[function(require,module,exports){
 'use strict'
 
 function deepPartialMatch (a, b) {
@@ -21514,6 +21520,10 @@ function deepPartialMatch (a, b) {
 
   if (a === b) {
     return true
+  } else if (a instanceof RegExp) {
+    return a.test(b)
+  } else if (b instanceof RegExp) {
+    return b.test(a)
   } else if (typeof a !== 'object' || typeof b !== 'object') {
     return false
   }
@@ -21532,6 +21542,21 @@ function deepPartialMatch (a, b) {
 module.exports = deepPartialMatch
 
 },{}],226:[function(require,module,exports){
+'use strict'
+
+function deepSort (a, b) {
+  if (a.magic > b.magic) {
+    return -1
+  } else if (a.magic < b.magic) {
+    return 1
+  } else {
+    return 0
+  }
+}
+
+module.exports = deepSort
+
+},{}],227:[function(require,module,exports){
 'use strict'
 
 function genKeys (obj, set) {
@@ -21555,7 +21580,7 @@ function noObjects (key) {
 
 module.exports = genKeys
 
-},{}],227:[function(require,module,exports){
+},{}],228:[function(require,module,exports){
 'use strict'
 
 var matchingBuckets = require('./matchingBuckets')
@@ -21612,7 +21637,7 @@ Iterator.prototype.next = function () {
 
 module.exports = Iterator
 
-},{"./deepMatch":225,"./matchingBuckets":228}],228:[function(require,module,exports){
+},{"./deepMatch":225,"./matchingBuckets":229}],229:[function(require,module,exports){
 'use strict'
 
 var genKeys = require('./genKeys.js')
@@ -21640,17 +21665,40 @@ function matchingBuckets (buckets, pattern, set) {
 
 module.exports = matchingBuckets
 
-},{"./genKeys.js":226}],229:[function(require,module,exports){
+},{"./genKeys.js":227}],230:[function(require,module,exports){
 'use strict'
 
-function PatternSet (pattern, payload) {
+function PatternSet (pattern, payload, isDeep) {
   this.pattern = pattern
   this.payload = payload || pattern
+  this.magic = 0
+
+  if (isDeep) {
+    this.magic = calcMagic(pattern)
+  }
+}
+
+function calcMagic (pattern) {
+  var keys = Object.keys(pattern)
+  var length = keys.length
+  var result = 0
+  var key
+
+  for (var i = 0; i < length; i++) {
+    key = keys[i]
+    if (typeof pattern[key] === 'object') {
+      result += calcMagic(pattern[key])
+    } else {
+      result++
+    }
+  }
+
+  return result
 }
 
 module.exports = PatternSet
 
-},{}],230:[function(require,module,exports){
+},{}],231:[function(require,module,exports){
 (function(exports) {
   exports.BloomFilter = BloomFilter;
   exports.fnv_1a = fnv_1a;
@@ -21770,12 +21818,12 @@ module.exports = PatternSet
   }
 })(typeof exports !== "undefined" ? exports : this);
 
-},{}],231:[function(require,module,exports){
+},{}],232:[function(require,module,exports){
 'use strict';
 
 module.exports = require('./is-implemented')() ? Set : require('./polyfill');
 
-},{"./is-implemented":232,"./polyfill":281}],232:[function(require,module,exports){
+},{"./is-implemented":233,"./polyfill":282}],233:[function(require,module,exports){
 'use strict';
 
 module.exports = function () {
@@ -21801,7 +21849,7 @@ module.exports = function () {
 	return true;
 };
 
-},{}],233:[function(require,module,exports){
+},{}],234:[function(require,module,exports){
 // Exports true if environment provides native `Set` implementation,
 // whatever that is.
 
@@ -21812,7 +21860,7 @@ module.exports = (function () {
 	return (Object.prototype.toString.call(Set.prototype) === '[object Set]');
 }());
 
-},{}],234:[function(require,module,exports){
+},{}],235:[function(require,module,exports){
 'use strict';
 
 var setPrototypeOf    = require('es5-ext/object/set-prototype-of')
@@ -21844,7 +21892,7 @@ SetIterator.prototype = Object.create(Iterator.prototype, {
 });
 defineProperty(SetIterator.prototype, toStringTagSymbol, d('c', 'Set Iterator'));
 
-},{"d":236,"es5-ext/object/set-prototype-of":259,"es5-ext/string/#/contains":264,"es6-iterator":271,"es6-symbol":275}],235:[function(require,module,exports){
+},{"d":237,"es5-ext/object/set-prototype-of":260,"es5-ext/string/#/contains":265,"es6-iterator":272,"es6-symbol":276}],236:[function(require,module,exports){
 'use strict';
 
 var copy       = require('es5-ext/object/copy')
@@ -21877,7 +21925,7 @@ module.exports = function (props/*, bindTo*/) {
 	});
 };
 
-},{"es5-ext/object/copy":249,"es5-ext/object/map":257,"es5-ext/object/valid-callable":262,"es5-ext/object/valid-value":263}],236:[function(require,module,exports){
+},{"es5-ext/object/copy":250,"es5-ext/object/map":258,"es5-ext/object/valid-callable":263,"es5-ext/object/valid-value":264}],237:[function(require,module,exports){
 'use strict';
 
 var assign        = require('es5-ext/object/assign')
@@ -21942,7 +21990,7 @@ d.gs = function (dscr, get, set/*, options*/) {
 	return !options ? desc : assign(normalizeOpts(options), desc);
 };
 
-},{"es5-ext/object/assign":246,"es5-ext/object/is-callable":252,"es5-ext/object/normalize-options":258,"es5-ext/string/#/contains":264}],237:[function(require,module,exports){
+},{"es5-ext/object/assign":247,"es5-ext/object/is-callable":253,"es5-ext/object/normalize-options":259,"es5-ext/string/#/contains":265}],238:[function(require,module,exports){
 // Inspired by Google Closure:
 // http://closure-library.googlecode.com/svn/docs/
 // closure_goog_array_array.js.html#goog.array.clear
@@ -21956,7 +22004,7 @@ module.exports = function () {
 	return this;
 };
 
-},{"../../object/valid-value":263}],238:[function(require,module,exports){
+},{"../../object/valid-value":264}],239:[function(require,module,exports){
 'use strict';
 
 var toPosInt = require('../../number/to-pos-integer')
@@ -21987,7 +22035,7 @@ module.exports = function (searchElement/*, fromIndex*/) {
 	return -1;
 };
 
-},{"../../number/to-pos-integer":244,"../../object/valid-value":263}],239:[function(require,module,exports){
+},{"../../number/to-pos-integer":245,"../../object/valid-value":264}],240:[function(require,module,exports){
 'use strict';
 
 var toString = Object.prototype.toString
@@ -21996,14 +22044,14 @@ var toString = Object.prototype.toString
 
 module.exports = function (x) { return (toString.call(x) === id); };
 
-},{}],240:[function(require,module,exports){
+},{}],241:[function(require,module,exports){
 'use strict';
 
 module.exports = require('./is-implemented')()
 	? Math.sign
 	: require('./shim');
 
-},{"./is-implemented":241,"./shim":242}],241:[function(require,module,exports){
+},{"./is-implemented":242,"./shim":243}],242:[function(require,module,exports){
 'use strict';
 
 module.exports = function () {
@@ -22012,7 +22060,7 @@ module.exports = function () {
 	return ((sign(10) === 1) && (sign(-20) === -1));
 };
 
-},{}],242:[function(require,module,exports){
+},{}],243:[function(require,module,exports){
 'use strict';
 
 module.exports = function (value) {
@@ -22021,7 +22069,7 @@ module.exports = function (value) {
 	return (value > 0) ? 1 : -1;
 };
 
-},{}],243:[function(require,module,exports){
+},{}],244:[function(require,module,exports){
 'use strict';
 
 var sign = require('../math/sign')
@@ -22035,7 +22083,7 @@ module.exports = function (value) {
 	return sign(value) * floor(abs(value));
 };
 
-},{"../math/sign":240}],244:[function(require,module,exports){
+},{"../math/sign":241}],245:[function(require,module,exports){
 'use strict';
 
 var toInteger = require('./to-integer')
@@ -22044,7 +22092,7 @@ var toInteger = require('./to-integer')
 
 module.exports = function (value) { return max(0, toInteger(value)); };
 
-},{"./to-integer":243}],245:[function(require,module,exports){
+},{"./to-integer":244}],246:[function(require,module,exports){
 // Internal method, used by iteration functions.
 // Calls a function for each key-value pair found in object
 // Optionally takes compareFn to iterate object in specific order
@@ -22075,14 +22123,14 @@ module.exports = function (method, defVal) {
 	};
 };
 
-},{"./valid-callable":262,"./valid-value":263}],246:[function(require,module,exports){
+},{"./valid-callable":263,"./valid-value":264}],247:[function(require,module,exports){
 'use strict';
 
 module.exports = require('./is-implemented')()
 	? Object.assign
 	: require('./shim');
 
-},{"./is-implemented":247,"./shim":248}],247:[function(require,module,exports){
+},{"./is-implemented":248,"./shim":249}],248:[function(require,module,exports){
 'use strict';
 
 module.exports = function () {
@@ -22093,7 +22141,7 @@ module.exports = function () {
 	return (obj.foo + obj.bar + obj.trzy) === 'razdwatrzy';
 };
 
-},{}],248:[function(require,module,exports){
+},{}],249:[function(require,module,exports){
 'use strict';
 
 var keys  = require('../keys')
@@ -22117,7 +22165,7 @@ module.exports = function (dest, src/*, …srcn*/) {
 	return dest;
 };
 
-},{"../keys":254,"../valid-value":263}],249:[function(require,module,exports){
+},{"../keys":255,"../valid-value":264}],250:[function(require,module,exports){
 'use strict';
 
 var assign = require('./assign')
@@ -22129,7 +22177,7 @@ module.exports = function (obj) {
 	return assign({}, obj);
 };
 
-},{"./assign":246,"./valid-value":263}],250:[function(require,module,exports){
+},{"./assign":247,"./valid-value":264}],251:[function(require,module,exports){
 // Workaround for http://code.google.com/p/v8/issues/detail?id=2804
 
 'use strict';
@@ -22167,19 +22215,19 @@ module.exports = (function () {
 	};
 }());
 
-},{"./set-prototype-of/is-implemented":260,"./set-prototype-of/shim":261}],251:[function(require,module,exports){
+},{"./set-prototype-of/is-implemented":261,"./set-prototype-of/shim":262}],252:[function(require,module,exports){
 'use strict';
 
 module.exports = require('./_iterate')('forEach');
 
-},{"./_iterate":245}],252:[function(require,module,exports){
+},{"./_iterate":246}],253:[function(require,module,exports){
 // Deprecated
 
 'use strict';
 
 module.exports = function (obj) { return typeof obj === 'function'; };
 
-},{}],253:[function(require,module,exports){
+},{}],254:[function(require,module,exports){
 'use strict';
 
 var map = { function: true, object: true };
@@ -22188,14 +22236,14 @@ module.exports = function (x) {
 	return ((x != null) && map[typeof x]) || false;
 };
 
-},{}],254:[function(require,module,exports){
+},{}],255:[function(require,module,exports){
 'use strict';
 
 module.exports = require('./is-implemented')()
 	? Object.keys
 	: require('./shim');
 
-},{"./is-implemented":255,"./shim":256}],255:[function(require,module,exports){
+},{"./is-implemented":256,"./shim":257}],256:[function(require,module,exports){
 'use strict';
 
 module.exports = function () {
@@ -22205,7 +22253,7 @@ module.exports = function () {
 	} catch (e) { return false; }
 };
 
-},{}],256:[function(require,module,exports){
+},{}],257:[function(require,module,exports){
 'use strict';
 
 var keys = Object.keys;
@@ -22214,7 +22262,7 @@ module.exports = function (object) {
 	return keys(object == null ? object : Object(object));
 };
 
-},{}],257:[function(require,module,exports){
+},{}],258:[function(require,module,exports){
 'use strict';
 
 var callable = require('./valid-callable')
@@ -22231,7 +22279,7 @@ module.exports = function (obj, cb/*, thisArg*/) {
 	return o;
 };
 
-},{"./for-each":251,"./valid-callable":262}],258:[function(require,module,exports){
+},{"./for-each":252,"./valid-callable":263}],259:[function(require,module,exports){
 'use strict';
 
 var forEach = Array.prototype.forEach, create = Object.create;
@@ -22250,14 +22298,14 @@ module.exports = function (options/*, …options*/) {
 	return result;
 };
 
-},{}],259:[function(require,module,exports){
+},{}],260:[function(require,module,exports){
 'use strict';
 
 module.exports = require('./is-implemented')()
 	? Object.setPrototypeOf
 	: require('./shim');
 
-},{"./is-implemented":260,"./shim":261}],260:[function(require,module,exports){
+},{"./is-implemented":261,"./shim":262}],261:[function(require,module,exports){
 'use strict';
 
 var create = Object.create, getPrototypeOf = Object.getPrototypeOf
@@ -22270,7 +22318,7 @@ module.exports = function (/*customCreate*/) {
 	return getPrototypeOf(setPrototypeOf(customCreate(null), x)) === x;
 };
 
-},{}],261:[function(require,module,exports){
+},{}],262:[function(require,module,exports){
 // Big thanks to @WebReflection for sorting this out
 // https://gist.github.com/WebReflection/5593554
 
@@ -22345,7 +22393,7 @@ module.exports = (function (status) {
 
 require('../create');
 
-},{"../create":250,"../is-object":253,"../valid-value":263}],262:[function(require,module,exports){
+},{"../create":251,"../is-object":254,"../valid-value":264}],263:[function(require,module,exports){
 'use strict';
 
 module.exports = function (fn) {
@@ -22353,7 +22401,7 @@ module.exports = function (fn) {
 	return fn;
 };
 
-},{}],263:[function(require,module,exports){
+},{}],264:[function(require,module,exports){
 'use strict';
 
 module.exports = function (value) {
@@ -22361,14 +22409,14 @@ module.exports = function (value) {
 	return value;
 };
 
-},{}],264:[function(require,module,exports){
+},{}],265:[function(require,module,exports){
 'use strict';
 
 module.exports = require('./is-implemented')()
 	? String.prototype.contains
 	: require('./shim');
 
-},{"./is-implemented":265,"./shim":266}],265:[function(require,module,exports){
+},{"./is-implemented":266,"./shim":267}],266:[function(require,module,exports){
 'use strict';
 
 var str = 'razdwatrzy';
@@ -22378,7 +22426,7 @@ module.exports = function () {
 	return ((str.contains('dwa') === true) && (str.contains('foo') === false));
 };
 
-},{}],266:[function(require,module,exports){
+},{}],267:[function(require,module,exports){
 'use strict';
 
 var indexOf = String.prototype.indexOf;
@@ -22387,7 +22435,7 @@ module.exports = function (searchString/*, position*/) {
 	return indexOf.call(this, searchString, arguments[1]) > -1;
 };
 
-},{}],267:[function(require,module,exports){
+},{}],268:[function(require,module,exports){
 'use strict';
 
 var toString = Object.prototype.toString
@@ -22399,7 +22447,7 @@ module.exports = function (x) {
 		((x instanceof String) || (toString.call(x) === id))) || false;
 };
 
-},{}],268:[function(require,module,exports){
+},{}],269:[function(require,module,exports){
 'use strict';
 
 var setPrototypeOf = require('es5-ext/object/set-prototype-of')
@@ -22431,7 +22479,7 @@ ArrayIterator.prototype = Object.create(Iterator.prototype, {
 	toString: d(function () { return '[object Array Iterator]'; })
 });
 
-},{"./":271,"d":236,"es5-ext/object/set-prototype-of":259,"es5-ext/string/#/contains":264}],269:[function(require,module,exports){
+},{"./":272,"d":237,"es5-ext/object/set-prototype-of":260,"es5-ext/string/#/contains":265}],270:[function(require,module,exports){
 'use strict';
 
 var isArguments = require('es5-ext/function/is-arguments')
@@ -22479,7 +22527,7 @@ module.exports = function (iterable, cb/*, thisArg*/) {
 	}
 };
 
-},{"./get":270,"es5-ext/function/is-arguments":239,"es5-ext/object/valid-callable":262,"es5-ext/string/is-string":267}],270:[function(require,module,exports){
+},{"./get":271,"es5-ext/function/is-arguments":240,"es5-ext/object/valid-callable":263,"es5-ext/string/is-string":268}],271:[function(require,module,exports){
 'use strict';
 
 var isArguments    = require('es5-ext/function/is-arguments')
@@ -22496,7 +22544,7 @@ module.exports = function (obj) {
 	return new ArrayIterator(obj);
 };
 
-},{"./array":268,"./string":273,"./valid-iterable":274,"es5-ext/function/is-arguments":239,"es5-ext/string/is-string":267,"es6-symbol":275}],271:[function(require,module,exports){
+},{"./array":269,"./string":274,"./valid-iterable":275,"es5-ext/function/is-arguments":240,"es5-ext/string/is-string":268,"es6-symbol":276}],272:[function(require,module,exports){
 'use strict';
 
 var clear    = require('es5-ext/array/#/clear')
@@ -22588,7 +22636,7 @@ defineProperty(Iterator.prototype, Symbol.iterator, d(function () {
 }));
 defineProperty(Iterator.prototype, Symbol.toStringTag, d('', 'Iterator'));
 
-},{"d":236,"d/auto-bind":235,"es5-ext/array/#/clear":237,"es5-ext/object/assign":246,"es5-ext/object/valid-callable":262,"es5-ext/object/valid-value":263,"es6-symbol":275}],272:[function(require,module,exports){
+},{"d":237,"d/auto-bind":236,"es5-ext/array/#/clear":238,"es5-ext/object/assign":247,"es5-ext/object/valid-callable":263,"es5-ext/object/valid-value":264,"es6-symbol":276}],273:[function(require,module,exports){
 'use strict';
 
 var isArguments    = require('es5-ext/function/is-arguments')
@@ -22605,7 +22653,7 @@ module.exports = function (value) {
 	return (typeof value[iteratorSymbol] === 'function');
 };
 
-},{"es5-ext/function/is-arguments":239,"es5-ext/string/is-string":267,"es6-symbol":275}],273:[function(require,module,exports){
+},{"es5-ext/function/is-arguments":240,"es5-ext/string/is-string":268,"es6-symbol":276}],274:[function(require,module,exports){
 // Thanks @mathiasbynens
 // http://mathiasbynens.be/notes/javascript-unicode#iterating-over-symbols
 
@@ -22644,7 +22692,7 @@ StringIterator.prototype = Object.create(Iterator.prototype, {
 	toString: d(function () { return '[object String Iterator]'; })
 });
 
-},{"./":271,"d":236,"es5-ext/object/set-prototype-of":259}],274:[function(require,module,exports){
+},{"./":272,"d":237,"es5-ext/object/set-prototype-of":260}],275:[function(require,module,exports){
 'use strict';
 
 var isIterable = require('./is-iterable');
@@ -22654,12 +22702,12 @@ module.exports = function (value) {
 	return value;
 };
 
-},{"./is-iterable":272}],275:[function(require,module,exports){
+},{"./is-iterable":273}],276:[function(require,module,exports){
 'use strict';
 
 module.exports = require('./is-implemented')() ? Symbol : require('./polyfill');
 
-},{"./is-implemented":276,"./polyfill":278}],276:[function(require,module,exports){
+},{"./is-implemented":277,"./polyfill":279}],277:[function(require,module,exports){
 'use strict';
 
 module.exports = function () {
@@ -22679,14 +22727,14 @@ module.exports = function () {
 	return true;
 };
 
-},{}],277:[function(require,module,exports){
+},{}],278:[function(require,module,exports){
 'use strict';
 
 module.exports = function (x) {
 	return (x && ((typeof x === 'symbol') || (x['@@toStringTag'] === 'Symbol'))) || false;
 };
 
-},{}],278:[function(require,module,exports){
+},{}],279:[function(require,module,exports){
 'use strict';
 
 var d              = require('d')
@@ -22775,7 +22823,7 @@ defineProperty(HiddenSymbol.prototype, SymbolPolyfill.toPrimitive,
 defineProperty(HiddenSymbol.prototype, SymbolPolyfill.toStringTag,
 	d('c', SymbolPolyfill.prototype[SymbolPolyfill.toStringTag]));
 
-},{"./validate-symbol":279,"d":236}],279:[function(require,module,exports){
+},{"./validate-symbol":280,"d":237}],280:[function(require,module,exports){
 'use strict';
 
 var isSymbol = require('./is-symbol');
@@ -22785,7 +22833,7 @@ module.exports = function (value) {
 	return value;
 };
 
-},{"./is-symbol":277}],280:[function(require,module,exports){
+},{"./is-symbol":278}],281:[function(require,module,exports){
 'use strict';
 
 var d        = require('d')
@@ -22919,7 +22967,7 @@ module.exports = exports = function (o) {
 };
 exports.methods = methods;
 
-},{"d":236,"es5-ext/object/valid-callable":262}],281:[function(require,module,exports){
+},{"d":237,"es5-ext/object/valid-callable":263}],282:[function(require,module,exports){
 'use strict';
 
 var clear          = require('es5-ext/array/#/clear')
@@ -22999,7 +23047,7 @@ ee(Object.defineProperties(SetPoly.prototype, {
 defineProperty(SetPoly.prototype, Symbol.iterator, d(getValues));
 defineProperty(SetPoly.prototype, Symbol.toStringTag, d('c', 'Set'));
 
-},{"./is-native-implemented":233,"./lib/iterator":234,"d":236,"es5-ext/array/#/clear":237,"es5-ext/array/#/e-index-of":238,"es5-ext/object/set-prototype-of":259,"es5-ext/object/valid-callable":262,"es6-iterator/for-of":269,"es6-iterator/valid-iterable":274,"es6-symbol":275,"event-emitter":280}],282:[function(require,module,exports){
+},{"./is-native-implemented":234,"./lib/iterator":235,"d":237,"es5-ext/array/#/clear":238,"es5-ext/array/#/e-index-of":239,"es5-ext/object/set-prototype-of":260,"es5-ext/object/valid-callable":263,"es6-iterator/for-of":270,"es6-iterator/valid-iterable":275,"es6-symbol":276,"event-emitter":281}],283:[function(require,module,exports){
 'use strict'
 
 function reusify (Constructor) {
@@ -23034,7 +23082,7 @@ function reusify (Constructor) {
 
 module.exports = reusify
 
-},{}],283:[function(require,module,exports){
+},{}],284:[function(require,module,exports){
 module.exports = extend
 
 var hasOwnProperty = Object.prototype.hasOwnProperty;
@@ -23055,7 +23103,7 @@ function extend() {
     return target
 }
 
-},{}],284:[function(require,module,exports){
+},{}],285:[function(require,module,exports){
 'use strict'
 
 var xtend = require('xtend')
@@ -23117,25 +23165,31 @@ function fastparallel (options) {
       singleCaller._release = singleCallerRelease
       singleCaller.parent = holder
       singleCaller.pos = i
-      toCall.call(that, arg[i], singleCaller.release)
+      if (that) {
+        toCall.call(that, arg[i], singleCaller.release)
+      } else {
+        toCall(arg[i], singleCaller.release)
+      }
     }
   }
 
   function goResultsArray (that, funcs, arg, holder) {
-    var singleCaller = null
-    var toCall = nop
+    var sc = null
+    var tc = nop
     holder._count = funcs.length
     holder._results = new Array(holder._count)
     for (var i = 0; i < funcs.length; i++) {
-      singleCaller = queueSingleCaller.get()
-      singleCaller._release = singleCallerRelease
-      singleCaller.parent = holder
-      singleCaller.pos = i
-      toCall = funcs[i]
-      if (toCall.length === 1) {
-        toCall.call(that, singleCaller.release)
+      sc = queueSingleCaller.get()
+      sc._release = singleCallerRelease
+      sc.parent = holder
+      sc.pos = i
+      tc = funcs[i]
+      if (that) {
+        if (tc.length === 1) tc.call(that, sc.release)
+        else tc.call(that, arg, sc.release)
       } else {
-        toCall.call(that, arg, singleCaller.release)
+        if (tc.length === 1) tc(sc.release)
+        else tc(arg, sc.release)
       }
     }
   }
@@ -23143,7 +23197,11 @@ function fastparallel (options) {
   function goNoResultsFunc (that, toCall, arg, holder) {
     holder._count = arg.length
     for (var i = 0; i < arg.length; i++) {
-      toCall.call(that, arg[i], holder.release)
+      if (that) {
+        toCall.call(that, arg[i], holder.release)
+      } else {
+        toCall(arg[i], holder.release)
+      }
     }
   }
 
@@ -23152,10 +23210,18 @@ function fastparallel (options) {
     holder._count = funcs.length
     for (var i = 0; i < funcs.length; i++) {
       toCall = funcs[i]
-      if (toCall.length === 1) {
-        toCall.call(that, holder.release)
+      if (that) {
+        if (toCall.length === 1) {
+          toCall.call(that, holder.release)
+        } else {
+          toCall.call(that, arg, holder.release)
+        }
       } else {
-        toCall.call(that, arg, holder.release)
+        if (toCall.length === 1) {
+          toCall(holder.release)
+        } else {
+          toCall(arg, holder.release)
+        }
       }
     }
   }
@@ -23171,8 +23237,13 @@ function NoResultsHolder () {
   var that = this
   var i = 0
   this.release = function () {
+    var cb = that._callback
     if (++i === that._count || that._count === 0) {
-      that._callback.call(that._callThat)
+      if (that._callThat) {
+        cb.call(that._callThat)
+      } else {
+        cb()
+      }
       that._callback = nop
       that._callThat = null
       that._release(that)
@@ -23210,9 +23281,14 @@ function ResultsHolder () {
   this.release = function (err, pos, result) {
     that._err = that._err || err
     that._results[pos] = result
+    var cb = that._callback
 
     if (++i === that._count || that._count === 0) {
-      that._callback.call(that._callThat, that._err, that._results)
+      if (that._callThat) {
+        cb.call(that._callThat, that._err, that._results)
+      } else {
+        cb(that._err, that._results)
+      }
       that._callback = nop
       that._results = null
       that._err = null
@@ -23227,4 +23303,4 @@ function nop () { }
 
 module.exports = fastparallel
 
-},{"reusify":282,"xtend":283}]},{},[1]);
+},{"reusify":283,"xtend":284}]},{},[1]);
